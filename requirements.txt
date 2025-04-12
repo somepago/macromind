@@ -1,0 +1,17 @@
+# Core dependencies
+numpy
+pandas
+requests
+python-dotenv
+
+# Data processing and analysis
+scikit-learn
+matplotlib
+seaborn
+
+# Web scraping and API
+beautifulsoup4
+finnhub-python
+
+# Web application
+flask
