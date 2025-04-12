@@ -234,17 +234,19 @@ class CommodityPricePredictor:
                  commodities: List[str],
                  startdate: str,
                  assistant_mode: str = "verbose"):
-        preds, explanations = [], []
+        preds, explanations, sentiment_scores = [], [], []
         for commodity in commodities:
             stock_prompt = self.format_stock_data(commodity,startdate)
             headlines = self.format_news(commodity,startdate)
             final_prompt = self.build_prompt(commodity, stock_prompt, headlines,assistant_mode) 
             final_prediction = self.predict_direction(final_prompt)
             pred, explanation = self.parse_prediction(final_prediction)
+            sentiment_score = self.compute_sentiment_score_bulk(headlines)
             preds.append(pred)
             explanations.append(explanation)
+            sentiment_scores.append(sentiment_score)
 
-        return preds, explanations
+        return preds, explanations, sentiment_scores
 
 
 

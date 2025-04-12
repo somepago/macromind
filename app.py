@@ -2,7 +2,8 @@ import streamlit as st
 from predictor import CommodityPricePredictor
 import pandas as pd
 from constants import current_news_data, current_stock_data
-
+from allocator import commodity_allocator
+import matplotlib.pyplot as plt
 # ---------- CONFIG ---------- #
 st.set_page_config(
     page_title="MacroMind",
@@ -123,12 +124,14 @@ if "predictions" not in st.session_state:
     st.session_state.predictions = None
     st.session_state.explanations = None
     st.session_state.show_explanations = {}
+    st.session_state.sentiment_scores = None
 
 if st.button("Predict Direction for All Commodities", use_container_width=True):
     with st.spinner("Crunching data and running models..."):
-        preds, expls = com_pred.pred_all(commodities, startdate)
+        preds, expls,sentiment_scores = com_pred.pred_all(commodities, startdate)
         st.session_state.predictions = preds
         st.session_state.explanations = expls
+        st.session_state.sentiment_scores = sentiment_scores
         st.session_state.show_explanations = {}
 
 # ---------- FORECAST RESULTS ---------- #
@@ -210,4 +213,61 @@ if st.session_state.predictions:
                 st.markdown(f"**{commodity}**: {explanation}")
             st.markdown("</div>")
 
-
+    # ---------- PORTFOLIO ALLOCATION ---------- #
+    st.markdown("<h2>💰 Portfolio Allocation</h2>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col1:
+        budget = st.number_input("Investment Budget ($)", min_value=100.0, max_value=1000000.0, value=10000.0, step=1000.0)
+    
+    with col2:
+        strategy = st.selectbox(
+            "Investment Strategy", 
+            ["aggressive", "conservative", "linear", "neutral_aware"],
+            help="Aggressive: Higher weights for UP predictions. Conservative: Lower weights overall. Linear: Direct correlation with sentiment. Neutral_aware: Considers neutral predictions."
+        )
+    
+    with col3:
+        temp = st.slider("Temperature", min_value=0.1, max_value=2.0, value=0.5, step=0.1, 
+                         help="Lower values create sharper differences between allocations. Higher values make allocations more even.")
+    
+    if st.button("Generate Portfolio Allocation", use_container_width=True):
+        # Use the precomputed predictions and sentiments
+        allocation_df = commodity_allocator(
+            com_pred=com_pred,
+            commodities=commodities,
+            startdate=startdate,
+            budget=budget,
+            strategy=strategy,
+            temp=temp,
+            precomputed_predictions=st.session_state.predictions,
+            precomputed_sentiments=st.session_state.sentiment_scores
+        )
+        
+        # Display the allocation table
+        st.dataframe(
+            allocation_df,
+            column_config={
+                "Commodity": st.column_config.TextColumn("Commodity"),
+                "Prediction": st.column_config.TextColumn("Prediction"),
+                "Sentiment Score": st.column_config.ProgressColumn("Sentiment", format="%.2f", min_value=0, max_value=1),
+                "Allocation Weight": st.column_config.ProgressColumn("Weight", format="%.2f", min_value=0, max_value=1),
+                "Dollar Allocation": st.column_config.NumberColumn("Allocation ($)", format="$%.2f")
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Create a pie chart for the allocations
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.pie(
+            allocation_df["Dollar Allocation"], 
+            labels=[f"{row['Commodity']} (${row['Dollar Allocation']:.2f})" for _, row in allocation_df.iterrows()],
+            autopct='%1.1f%%',
+            startangle=90,
+            shadow=False,
+            explode=[0.05] * len(commodities)
+        )
+        ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle
+        st.pyplot(fig)

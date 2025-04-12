@@ -48,18 +48,22 @@ def commodity_allocator(com_pred: CommodityPricePredictor,
                         budget: float = 100.0,
                         assistant_mode: str = "verbose",
                         strategy: str = "aggressive",
-                        temp: float = 0.5) -> pd.DataFrame:
+                        temp: float = 0.5,
+                        precomputed_predictions: List[str] = None,
+                        precomputed_sentiments: List[float] = None) -> pd.DataFrame:
     """
     Allocate portfolio dollar amounts across commodities based on LLM predictions and sentiment.
 
     Parameters:
-    - com_pred: Instance of CommodityPricePredictor
+    - com_pred: CommodityPricePredictor instance
     - commodities: List of commodity names
     - startdate: Date string (e.g., "2025-04-06")
     - budget: Total dollars to allocate (default is 100)
     - assistant_mode: "verbose" or "terse"
     - strategy: Weighting strategy ("linear", "aggressive", "conservative", etc.)
     - temp: Temperature for softmax (lower = sharper differences)
+    - precomputed_predictions: Optional list of precomputed predictions (UP, DOWN, SAME)
+    - precomputed_sentiments: Optional list of precomputed sentiment scores (0 to 1)
 
     Returns a DataFrame with:
     - Commodity
@@ -68,19 +72,24 @@ def commodity_allocator(com_pred: CommodityPricePredictor,
     - Allocation Weight (0 to 1)
     - Dollar Allocation (rounded to 2 decimals)
     """
-    predictions = []
-    sentiments = []
+    # Use precomputed values if provided, otherwise compute them
+    if precomputed_predictions is not None and precomputed_sentiments is not None:
+        predictions = [p.upper() for p in precomputed_predictions]
+        sentiments = precomputed_sentiments
+    else:
+        predictions = []
+        sentiments = []
 
-    for commodity in commodities:
-        stock_prompt = com_pred.format_stock_data(commodity, startdate)
-        headlines = com_pred.format_news(commodity, startdate)
-        prompt = com_pred.build_prompt(commodity, stock_prompt, headlines, assistant_mode)
-        raw_prediction = com_pred.predict_direction(prompt)
-        prediction, _ = com_pred.parse_prediction(raw_prediction)
-        sentiment_score = com_pred.compute_sentiment_score_bulk(headlines)
+        for commodity in commodities:
+            stock_prompt = com_pred.format_stock_data(commodity, startdate)
+            headlines = com_pred.format_news(commodity, startdate)
+            prompt = com_pred.build_prompt(commodity, stock_prompt, headlines, assistant_mode)
+            raw_prediction = com_pred.predict_direction(prompt)
+            prediction, _ = com_pred.parse_prediction(raw_prediction)
+            sentiment_score = com_pred.compute_sentiment_score_bulk(headlines)
 
-        predictions.append(prediction.upper())
-        sentiments.append(sentiment_score)
+            predictions.append(prediction.upper())
+            sentiments.append(sentiment_score)
 
     # Get the strategy-based scoring function
     weight_fn = get_weighting_function(strategy)
