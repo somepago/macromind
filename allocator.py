@@ -1,13 +1,54 @@
 from predictor import CommodityPricePredictor
-from typing import List
+from typing import List, Callable
 import pandas as pd
+import numpy as np
 from constants import current_news_data, current_stock_data
+
+def softmax(x, temp=1.0):
+    x = np.array(x)
+    e_x = np.exp(x / temp)
+    return (e_x / e_x.sum()).tolist()
+
+# Define strategy mapping
+def get_weighting_function(strategy: str) -> Callable[[str, float], float]:
+    """
+    Returns a function (prediction, sentiment) -> score, based on the strategy.
+    """
+    strategies = {
+        "linear": lambda pred, s: {
+            "UP": s,
+            "SAME": 0.3 * s,
+            "DOWN": 0.0
+        }.get(pred, 0.0),
+
+        "aggressive": lambda pred, s: {
+            "UP": 0.5 + 0.5 * s,
+            "SAME": 0.1 + 0.2 * s,
+            "DOWN": 0.0
+        }.get(pred, 0.0),
+
+        "conservative": lambda pred, s: {
+            "UP": 0.2 + 0.3 * s,
+            "SAME": 0.1 * s,
+            "DOWN": 0.0
+        }.get(pred, 0.0),
+
+        "neutral_aware": lambda pred, s: {
+            "UP": s,
+            "SAME": s * 0.1,
+            "DOWN": (1 - s) * 0.05  # Very small allocation for low sentiment & down
+        }.get(pred, 0.0)
+    }
+
+    return strategies.get(strategy, strategies["linear"])  # Default to "linear"
 
 def commodity_allocator(com_pred: CommodityPricePredictor,
                         commodities: List[str],
                         startdate: str,
                         budget: float = 100.0,
-                        assistant_mode: str = "verbose") -> pd.DataFrame:
+                        assistant_mode: str = "verbose",
+                        strategy: str = "aggressive",
+                        temp: float = 0.5) -> pd.DataFrame:
     """
     Allocate portfolio dollar amounts across commodities based on LLM predictions and sentiment.
 
@@ -16,7 +57,9 @@ def commodity_allocator(com_pred: CommodityPricePredictor,
     - commodities: List of commodity names
     - startdate: Date string (e.g., "2025-04-06")
     - budget: Total dollars to allocate (default is 100)
-    - assistant_mode: Whether to use verbose or terse mode for predictions
+    - assistant_mode: "verbose" or "terse"
+    - strategy: Weighting strategy ("linear", "aggressive", "conservative", etc.)
+    - temp: Temperature for softmax (lower = sharper differences)
 
     Returns a DataFrame with:
     - Commodity
@@ -39,24 +82,11 @@ def commodity_allocator(com_pred: CommodityPricePredictor,
         predictions.append(prediction.upper())
         sentiments.append(sentiment_score)
 
-    # Compute base scores
-    base_scores = []
-    for pred, sentiment in zip(predictions, sentiments):
-        if pred == "UP":
-            base_scores.append(sentiment)
-        elif pred == "SAME":
-            base_scores.append(sentiment * 0.3)  # Smaller allocation
-        else:  # DOWN
-            base_scores.append(0.0)
+    # Get the strategy-based scoring function
+    weight_fn = get_weighting_function(strategy)
+    raw_scores = [weight_fn(pred, sentiment) for pred, sentiment in zip(predictions, sentiments)]
 
-    # Normalize weights
-    total_score = sum(base_scores)
-    if total_score > 0:
-        weights = [score / total_score for score in base_scores]
-    else:
-        # Fall back to equal allocation
-        weights = [1 / len(commodities)] * len(commodities)
-
+    weights = softmax(raw_scores, temp=temp)
     allocations = [round(w * budget, 2) for w in weights]
 
     allocation_df = pd.DataFrame({
@@ -74,5 +104,6 @@ if __name__ == "__main__":
     commodities = ["coffee", "gold", "oil"]
     startdate = "2025-04-06"
     budget = 100.0
-    allocation = commodity_allocator(com_pred, commodities, startdate, budget)
+    strategy = "aggressive"  # Try "conservative", "linear", etc.
+    allocation = commodity_allocator(com_pred, commodities, startdate, budget, strategy=strategy)
     print(allocation)
