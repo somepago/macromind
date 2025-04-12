@@ -141,6 +141,18 @@ class CommodityPricePredictor:
         )
         return response.choices[0].message.content.strip()
 
+    def parse_prediction(self, final_prediction: str) -> tuple:
+        # Split the prediction into parts and handle various formats
+        parts = final_prediction.strip().split("\n")
+        if len(parts) >= 3:
+            pred, _, explanation = parts[:3]
+        elif len(parts) == 2:
+            pred, explanation = parts
+        else:
+            pred = parts[0]
+            explanation = "No detailed explanation provided"
+        return pred.strip(), explanation.strip()
+
     def __call__(self,
             commodity: str,
             startdate: str,
@@ -149,8 +161,7 @@ class CommodityPricePredictor:
         headlines = self.format_news(commodity,startdate)
         final_prompt = self.build_prompt(commodity, stock_prompt, headlines,assistant_mode) 
         final_prediction = self.predict_direction(final_prompt)
-        pred, _ ,explanation = final_prediction.split("\n")
-        return pred, explanation
+        return self.parse_prediction(final_prediction)
     
 
     def pred_all(self,
@@ -163,7 +174,7 @@ class CommodityPricePredictor:
             headlines = self.format_news(commodity,startdate)
             final_prompt = self.build_prompt(commodity, stock_prompt, headlines,assistant_mode) 
             final_prediction = self.predict_direction(final_prompt)
-            pred, _ ,explanation = final_prediction.split("\n")
+            pred, explanation = self.parse_prediction(final_prediction)
             preds.append(pred)
             explanations.append(explanation)
 
