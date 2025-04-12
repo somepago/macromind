@@ -8,6 +8,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 from constants import current_news_data, current_stock_data
+from typing import List
 # Setup your OpenAI API Key
 openai_key = "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"  # Or paste directly: "sk-..."
 
@@ -78,6 +79,9 @@ class CommodityPricePredictor:
         # Sort latest first
         df = df.sort_values(by='datetime', ascending=False)
         
+        # Drop rows with NaN in headline or summary
+        df = df.dropna(subset=['headline'])
+        
         # Combine headline and summary
         combined = df.apply(
             lambda row: f"{row['headline'].strip()}: {row['summary'].strip()}"
@@ -85,7 +89,10 @@ class CommodityPricePredictor:
             axis=1
         )
 
-        return combined.tolist()[:num_headlines]
+        # Filter out any remaining NaN values
+        combined = combined.dropna()
+        
+        return combined.values.tolist()[:num_headlines]
 
     # Step 4: Build the prompt
     @staticmethod
@@ -133,9 +140,20 @@ class CommodityPricePredictor:
             temperature=0.2
         )
         return response.choices[0].message.content.strip()
-    
 
     def __call__(self,
+            commodity: str,
+            startdate: str,
+            assistant_mode: str = "verbose"):
+        stock_prompt = self.format_stock_data(commodity,startdate)
+        headlines = self.format_news(commodity,startdate)
+        final_prompt = self.build_prompt(commodity, stock_prompt, headlines,assistant_mode) 
+        final_prediction = self.predict_direction(final_prompt)
+        pred, _ ,explanation = final_prediction.split("\n")
+        return pred, explanation
+    
+
+    def pred_all(self,
                  commodities: List[str],
                  startdate: str,
                  assistant_mode: str = "verbose"):

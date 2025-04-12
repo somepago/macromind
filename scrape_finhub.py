@@ -69,6 +69,8 @@ news = fetch_news_by_ticker(tickers, from_date, to_date, api_key)
 if news:
     mapped_news = map_articles_to_commodities(news, commodity_to_etfs_stocks)
     df = pd.DataFrame(mapped_news)
+    # replace Nans with ""
+    df.fillna('', inplace=True)
     print(df[['datetime', 'headline', 'source', 'url', 'ticker', 'commodity']].head())
     # Generate timestamp for unique filename
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

@@ -1,7 +1,8 @@
+import pandas as pd
 
 HISTORY_IN_DAYS = 60
 
-current_news_data = "data_prep/scraped_news_finhub/commodity_news_20250411_230516.csv"
+current_news_data = "data_prep/scraped_news_finhub/commodity_news_20250412_133520.csv"
 current_stock_data = "data_prep/commodity_data_60days.csv"
 
 # Commodity to ETF/Stock mapping
@@ -62,3 +63,10 @@ def ticker_to_commodity_mapping(com_to_tick_dict):
     return mapping_dict
 
 etfs_stocks_to_commodity = ticker_to_commodity_mapping(commodity_to_etfs_stocks)
+
+def pred_com(current_news_data, current_stock_data):
+    news_df = pd.read_csv(current_news_data)
+    stock_df = pd.read_csv(current_stock_data)
+    return list(set(stock_df['Commodity']).intersection(set(news_df['commodity'])))
+
+predictable_commodities = pred_com(current_news_data, current_stock_data)

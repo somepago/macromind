@@ -42,6 +42,7 @@ def fetch_daily_average_price(tickers, num_days=5):
             avg_price_df = pd.concat([avg_price_df, ticker_data[['Average', 'Ticker','Commodity']].copy()])
 
     avg_price_df.reset_index(inplace=True)
+    avg_price_df = avg_price_df[avg_price_df['Average'].notna()]
 
     print(avg_price_df.head())
     
