@@ -8,15 +8,13 @@ import pandas as pd
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 from constants import current_news_data, current_stock_data
-from typing import List
+from typing import List, Dict, Tuple, Any
+from functools import lru_cache
+
 # Setup your OpenAI API Key
 openai_key = "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"  # Or paste directly: "sk-..."
-
 client = OpenAI(api_key=openai_key)
 
-
-# Define stock or ETF to analyze
-stock_symbol = "GLD"  # You can change to any from your ETF/stock list
 class CommodityPricePredictor:
     def __init__(self, news_df=None, price_df=None, num_days=2) -> None:
         if news_df is not None:
@@ -27,6 +25,8 @@ class CommodityPricePredictor:
             self.commodity_price_df = pd.read_csv(price_df)
         else:
             self.fetch_price(12)
+        # Initialize cache dictionary
+        self._cache: Dict[Tuple[str, str, str], Tuple[str, str, float]] = {}
 
     def fetch_news(self,num_days):
         pass # TODO
@@ -128,6 +128,53 @@ class CommodityPricePredictor:
             """
         return prompt.strip()
 
+    @staticmethod
+    def compute_sentiment_score_bulk(headlines: List[str]) -> float:
+        """
+        Get average sentiment score (0 to 1) for a commodity based on recent news.
+        Uses a single GPT call for all headlines.
+        """
+        if not headlines:
+            return 0.5  # Neutral by default
+
+        # Create numbered list
+        formatted_headlines = "\n".join([f"{i+1}. {headline}" for i, headline in enumerate(headlines)])
+
+        prompt = f"""
+        Analyze the sentiment of the following commodity news headlines. 
+        For each headline, respond with one word: Positive, Neutral, or Negative.
+        
+        Headlines:
+        {formatted_headlines}
+        
+        Output the sentiment list in this format:
+        1. Positive
+        2. Negative
+        3. Neutral
+        ...
+        """
+
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": prompt.strip()}],
+                temperature=0.0
+            )
+            sentiment_lines = response.choices[0].message.content.strip().splitlines()
+            score_map = {"positive": 1.0, "neutral": 0.5, "negative": 0.0}
+            scores = []
+
+            for line in sentiment_lines:
+                parts = line.strip().split(".")
+                if len(parts) == 2:
+                    sentiment = parts[1].strip().lower()
+                    scores.append(score_map.get(sentiment, 0.5))  # Default to neutral
+
+            return sum(scores) / len(scores) if scores else 0.5
+        except Exception as e:
+            print(f"[Sentiment Error] {e}")
+            return 0.5  # Default to neutral
+
 
     # Step 5: Query the LLM (GPT-4)
     @staticmethod
@@ -157,12 +204,31 @@ class CommodityPricePredictor:
             commodity: str,
             startdate: str,
             assistant_mode: str = "verbose"):
-        stock_prompt = self.format_stock_data(commodity,startdate)
-        headlines = self.format_news(commodity,startdate)
-        final_prompt = self.build_prompt(commodity, stock_prompt, headlines,assistant_mode) 
+        # Create cache key based on input parameters
+        cache_key = (commodity, startdate, assistant_mode)
+        
+        # Check if result is already in cache
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+        
+        # If not in cache, compute the result
+        stock_prompt = self.format_stock_data(commodity, startdate)
+        headlines = self.format_news(commodity, startdate)
+        final_prompt = self.build_prompt(commodity, stock_prompt, headlines, assistant_mode) 
         final_prediction = self.predict_direction(final_prompt)
-        return self.parse_prediction(final_prediction)
+        sentiment_score = self.compute_sentiment_score_bulk(headlines)
+        pred, explanation = self.parse_prediction(final_prediction)
+        
+        # Store result in cache
+        result = (pred, explanation, sentiment_score)
+        self._cache[cache_key] = result
+        
+        return result
     
+    def clear_cache(self) -> None:
+        """Clear the prediction cache."""
+        self._cache.clear()
+
 
     def pred_all(self,
                  commodities: List[str],
@@ -181,19 +247,13 @@ class CommodityPricePredictor:
         return preds, explanations
 
 
-        
-
-
-
 
 if __name__ == "__main__":
     com_pred = CommodityPricePredictor(news_df=current_news_data,price_df=current_stock_data)
     commodity = "coffee"
     startdate = "2025-04-06"
-    future_direction, explanation = com_pred(commodity,startdate,"verbose")
-    print(future_direction, explanation)
-
-
+    output = com_pred(commodity,startdate,"verbose")
+    print(output)
 
     # # Initialize predictor
     # com_pred = CommodityPricePredictor(

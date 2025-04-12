@@ -1,5 +1,5 @@
 import streamlit as st
-from main import CommodityPricePredictor
+from predictor import CommodityPricePredictor
 import pandas as pd
 from constants import current_news_data, current_stock_data
 
