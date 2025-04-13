@@ -14,6 +14,12 @@ def map_trend_to_numeric(trend: str) -> int:
     }
     return trend_map.get(trend.upper(), 0)  # Default to 'SAME' if unknown trend
 
+# Enhanced mapping function with boosted weights for macro trends
+def map_trend_to_numeric_boosted(trend: str, boost_factor: float = 2.5) -> float:
+    """Maps trend predictions to numeric values with a boost factor to increase their influence"""
+    base_value = map_trend_to_numeric(trend)
+    return base_value * boost_factor  # Apply boosting to increase influence
+
 def price_forecast(
     com_pred: CommodityPricePredictor,
     price_df: str, 
@@ -42,10 +48,12 @@ def price_forecast(
     
     # Use precomputed values if provided, otherwise compute them
     if precomputed_predictions is not None and precomputed_sentiments is not None:
-        predictions = [map_trend_to_numeric(p) for p in precomputed_predictions]
+        original_predictions = precomputed_predictions.copy()  # Store original text predictions
+        predictions = [map_trend_to_numeric_boosted(p) for p in precomputed_predictions]
         sentiments = precomputed_sentiments
     else:
         predictions = []
+        original_predictions = []  # Store original text predictions
         sentiments = []
 
         for commodity in commodities:
@@ -56,7 +64,8 @@ def price_forecast(
             prediction, _ = com_pred.parse_prediction(raw_prediction)
             sentiment_score = com_pred.compute_sentiment_score_bulk(headlines)
 
-            predictions.append(map_trend_to_numeric(prediction))
+            original_predictions.append(prediction.upper())  # Store original text prediction
+            predictions.append(map_trend_to_numeric_boosted(prediction))
             sentiments.append(sentiment_score)
     
     forecast_results = []
@@ -65,6 +74,7 @@ def price_forecast(
     for idx, commodity in enumerate(commodities):
         sentiment_score = sentiments[idx]
         trend_prediction = predictions[idx]
+        trend_text = original_predictions[idx]  # Get original text prediction
         
         # Prepare price data
         price_grouped = price_df.groupby(['Commodity', 'Date'], as_index=False)['Average'].mean()
@@ -86,7 +96,7 @@ def price_forecast(
         # Fit Prophet model with sentiment and trend prediction
         model = Prophet()
         model.add_regressor('sentiment_score')
-        model.add_regressor('trend_prediction')  # Add trend prediction as a regressor
+        model.add_regressor('trend_prediction', standardize=False)  # Don't standardize to preserve boosted impact
         model.fit(df_price)
 
         # Create future frame
@@ -108,18 +118,19 @@ def price_forecast(
         forecast['current_price'] = current_price
         forecast['predicted_price'] = forecast['yhat']
         forecast['sentiment'] = sentiment_score
-        forecast['trend_macro'] = trend_prediction
+        forecast['trend_macro'] = trend_text  # Store original text prediction
+        forecast['trend_numeric'] = trend_prediction  # Keep numeric version for calculations
         forecast['gain_percent'] = ((forecast['yhat'] - current_price) / current_price) * 100
         
         forecast['Commodity'] = commodity
         forecast_results.append(forecast[['ds', 'yhat', 'Commodity', 'sentiment', 'trend_macro',
-                                         'current_price', 'predicted_price', 'gain_percent']])
+                                         'trend_numeric', 'current_price', 'predicted_price', 'gain_percent']])
 
     # Combine all forecasts
     all_forecasts = pd.concat(forecast_results, ignore_index=True)
     return all_forecasts
 
-def allocate_funds(forecast_df: pd.DataFrame, total_funds: float = 100) -> pd.DataFrame:
+def allocate_funds(forecast_df: pd.DataFrame, total_funds: float = 100, strategy: str = 'aggressive') -> pd.DataFrame:
     """
     Allocates funds to different commodities based on predicted gain percentages.
     If the gain percentage is negative, the commodity is not allocated any funds.
@@ -128,58 +139,118 @@ def allocate_funds(forecast_df: pd.DataFrame, total_funds: float = 100) -> pd.Da
     Parameters:
     - forecast_df: DataFrame with columns ['Commodity', 'current_price', 'predicted_price', 'gain_percent']
     - total_funds: Total available funds to allocate (default is $100)
+    - strategy: Investment strategy to use ('aggressive', 'conservative', 'neutral_aware', 'equal')
+      - aggressive: Heavily weights commodities with highest predicted gains
+      - conservative: More cautious allocation including less negative options
+      - neutral_aware: Considers both gain percentage and sentiment/trend data
+      - equal: Equal allocation to commodities with positive gains
 
     Returns:
     - DataFrame with allocation and potential dollar gain for each commodity
     """
-    # Step 1: Calculate the gain percentage (if not already present)
-    forecast_df['gain_percent'] = ((forecast_df['predicted_price'] - forecast_df['current_price']) / forecast_df['current_price']) * 100
-
-    # Create a working copy that includes all commodities for display
-    all_commodities_df = forecast_df.copy()
+    # Make a copy to avoid modifying the original
+    forecast_df = forecast_df.copy()
     
-    # Step 2: Filter out commodities with negative gain_percent for allocation purposes
-    positive_returns_df = forecast_df[forecast_df['gain_percent'] > 0].copy()
+    # Step 1: Calculate the gain percentage (if not already present)
+    if 'gain_percent' not in forecast_df.columns:
+        forecast_df['gain_percent'] = ((forecast_df['predicted_price'] - forecast_df['current_price']) / forecast_df['current_price']) * 100
 
-    # If there are no positive gain commodities, allocate based on least negative
-    if positive_returns_df.empty:
-        # For negative returns, find the least negative ones
-        forecast_df['allocation'] = 0  # Default to zero allocation
+    # Initialize allocation column
+    forecast_df['allocation'] = 0
+    
+    # Apply different allocation strategies
+    if strategy == 'aggressive':
+        # Aggressive: Square the positive gain percentages to amplify differences
+        positive_returns_df = forecast_df[forecast_df['gain_percent'] > 0].copy()
+        if not positive_returns_df.empty:
+            # Square the gain percentages to give much higher weight to higher gains
+            positive_returns_df['weight'] = positive_returns_df['gain_percent'] ** 2
+            total_weight = positive_returns_df['weight'].sum()
+            
+            # Update allocations for positive return commodities in the original dataframe
+            for idx, row in positive_returns_df.iterrows():
+                allocation_amount = (row['weight'] / total_weight) * total_funds
+                forecast_df.loc[idx, 'allocation'] = allocation_amount
+        else:
+            # If no positive returns, allocate to the least negative
+            least_negative_idx = forecast_df['gain_percent'].idxmax()
+            forecast_df.loc[least_negative_idx, 'allocation'] = total_funds
+    
+    elif strategy == 'conservative':
+        # Conservative: Consider all commodities but skew toward less negative ones
+        # Shift all gain percentages to make them relative to the worst performer
+        min_gain = forecast_df['gain_percent'].min() - 0.1  # Subtract 0.1 to ensure all values are positive
+        forecast_df['shifted_gain'] = forecast_df['gain_percent'] - min_gain
         
-        # Only if we must allocate, choose least negative options
-        if len(forecast_df) > 0:
-            # Shift values to make them positive for allocation
-            min_gain = forecast_df['gain_percent'].min()
-            if min_gain < 0:
-                adjusted_gain = forecast_df['gain_percent'] - min_gain + 0.1  # Small positive offset
-                total_adj_gain = adjusted_gain.sum()
-                forecast_df['allocation'] = (adjusted_gain / total_adj_gain) * total_funds
+        # Use the square root to reduce differences (more equal allocation)
+        forecast_df['weight'] = forecast_df['shifted_gain'].apply(lambda x: max(0.1, x ** 0.5))
+        total_weight = forecast_df['weight'].sum()
+        
+        # Allocate proportionally
+        forecast_df['allocation'] = (forecast_df['weight'] / total_weight) * total_funds
+    
+    elif strategy == 'neutral_aware':
+        # Neutral aware: Consider both gain percentage and sentiment
+        # Create a combined score using gain percentage and sentiment
+        if 'sentiment' in forecast_df.columns:
+            forecast_df['combined_score'] = forecast_df['gain_percent'] + (forecast_df['sentiment'] * 20)
+            
+            # Add a small boost based on the trend direction
+            if 'trend_numeric' in forecast_df.columns:
+                # Using a gentler weight of 2 for trend impact
+                forecast_df['combined_score'] += forecast_df['trend_numeric'] * 2
+            
+            # Ensure minimum score is positive
+            min_score = forecast_df['combined_score'].min() - 0.1
+            if min_score < 0:
+                forecast_df['adjusted_score'] = forecast_df['combined_score'] - min_score
             else:
-                # Equal allocation if all are zero
-                forecast_df['allocation'] = total_funds / len(forecast_df)
-    else:
-        # Step 3: Normalize positive gain percentages to sum to 100%
-        total_gain = positive_returns_df['gain_percent'].sum()
-        positive_returns_df['allocation'] = (positive_returns_df['gain_percent'] / total_gain) * total_funds
-        
-        # Merge allocations back to original dataframe
-        forecast_df = forecast_df.copy()
-        forecast_df['allocation'] = 0  # Default all to zero
-        for idx, row in positive_returns_df.iterrows():
-            forecast_df.loc[forecast_df['Commodity'] == row['Commodity'], 'allocation'] = row['allocation']
-
-    # Step 5: Calculate the potential dollar gain for each commodity
+                forecast_df['adjusted_score'] = forecast_df['combined_score']
+                
+            # Allocate based on adjusted score
+            total_score = forecast_df['adjusted_score'].sum()
+            forecast_df['allocation'] = (forecast_df['adjusted_score'] / total_score) * total_funds
+        else:
+            # Fall back to equal if sentiment data not available
+            # Only distribute among positive gain commodities
+            positive_returns_df = forecast_df[forecast_df['gain_percent'] > 0]
+            if not positive_returns_df.empty:
+                equal_allocation = total_funds / len(positive_returns_df)
+                for idx in positive_returns_df.index:
+                    forecast_df.loc[idx, 'allocation'] = equal_allocation
+    
+    else:  # 'equal' strategy (default)
+        # Equal: Only distribute among positive gain commodities
+        positive_returns_df = forecast_df[forecast_df['gain_percent'] > 0]
+        if not positive_returns_df.empty:
+            equal_allocation = total_funds / len(positive_returns_df)
+            for idx in positive_returns_df.index:
+                forecast_df.loc[idx, 'allocation'] = equal_allocation
+        elif len(forecast_df) > 0:
+            # If no positive returns, allocate to the least negative
+            least_negative_idx = forecast_df['gain_percent'].idxmax()
+            forecast_df.loc[least_negative_idx, 'allocation'] = total_funds
+    
+    # Step 3: Calculate the potential dollar gain for each commodity
     forecast_df['predicted_gain_dollars'] = (
         (forecast_df['predicted_price'] - forecast_df['current_price']) *
         (forecast_df['allocation'] / forecast_df['current_price'])
     )
     
+    # Prepare the display columns
     forecast_df['MacroEconIndicator'] = forecast_df['trend_macro']
     forecast_df['Sentiment Score'] = forecast_df['sentiment']
-    forecast_df.rename(columns={'gain_percent': 'Predicted Gain (%)', 'allocation': 'Allocation (%)', 'predicted_gain_dollars':'Projected Return ($)'}, inplace=True)
-    forecast_df = forecast_df[['Commodity', 'MacroEconIndicator', 'Sentiment Score', 'Predicted Gain (%)', 'Allocation (%)', 'Projected Return ($)']]
-    return forecast_df
-
+    forecast_df.rename(columns={
+        'gain_percent': 'Predicted Gain (%)', 
+        'allocation': 'Allocation (%)', 
+        'predicted_gain_dollars': 'Projected Return ($)'
+    }, inplace=True)
+    
+    # Select and order the columns for display
+    result_df = forecast_df[['Commodity', 'MacroEconIndicator', 'Sentiment Score', 
+                            'Predicted Gain (%)', 'Allocation (%)', 'Projected Return ($)']]
+    
+    return result_df
 
 if __name__ == "__main__":
     from constants import current_news_data, current_stock_data
@@ -198,5 +269,5 @@ if __name__ == "__main__":
 
     print(forecast_df)
 
-    allocations = allocate_funds(forecast_df,100)
+    allocations = allocate_funds(forecast_df,100, strategy='aggressive')
     print(allocations)

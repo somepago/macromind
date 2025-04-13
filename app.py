@@ -272,7 +272,7 @@ if st.session_state.predictions:
         with col2:
             strategy = st.selectbox(
                 "Investment Strategy", 
-                ["aggressive", "conservative", "linear", "neutral_aware"],
+                ["aggressive", "conservative", "neutral_aware"],
                 help="Aggressive: Higher weights for UP predictions. Conservative: Lower weights overall. Linear: Direct correlation with sentiment. Neutral_aware: Considers neutral predictions."
             )
         
@@ -301,7 +301,7 @@ if st.session_state.predictions:
         )
         
         # Project gains
-        gains_df = allocate_funds(forecast_df, budget)
+        gains_df = allocate_funds(forecast_df, budget, strategy=strategy)
         
         # Display the allocation table
         st.dataframe(
