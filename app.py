@@ -2,7 +2,7 @@ import streamlit as st
 from predictor import CommodityPricePredictor
 import pandas as pd
 from constants import current_news_data, current_stock_data
-from allocator import commodity_allocator
+from allocator import commodity_allocator, project_gains
 import matplotlib.pyplot as plt
 
 # ---------- CONFIG ---------- #
@@ -263,7 +263,7 @@ if st.session_state.predictions:
     if st.session_state.predictions is not None:
         st.markdown("<h2>💰 Portfolio Allocation</h2>", unsafe_allow_html=True)
         
-        col1, col2, col3 = st.columns([1, 1, 1])
+        col1, col2, col3, col4 =  st.columns([1, 1, 1, 1])
         
         with col1:
             budget = st.number_input("Investment Budget ($)", min_value=100.0, max_value=1000000.0, value=1000.0, step=100.0)
@@ -279,6 +279,8 @@ if st.session_state.predictions:
             temp = st.slider("Temperature", min_value=0.1, max_value=2.0, value=0.5, step=0.1, 
                              help="Lower values create sharper differences between allocations. Higher values make allocations more even.")
         
+        with col4:
+            horizon_day = st.number_input("Forecast Horizon (days)", min_value=1, max_value=30, value=7, step=1)
         # Get indices of currently selected commodities
         selected_indices = [st.session_state.selected_commodities.index(commodity) for commodity in st.session_state.selected_commodities]
         
@@ -298,15 +300,28 @@ if st.session_state.predictions:
             precomputed_sentiments=filtered_sentiments
         )
         
+        # Project gains
+        gains_df = project_gains(
+            allocation_df,
+            current_stock_data,
+            startdate,
+            horizon_days=horizon_day
+        )
+        gains_df.drop(columns=["Mode", "Horizon (days)"])
+        
         # Display the allocation table
         st.dataframe(
-            allocation_df,
+            gains_df,
             column_config={
                 "Commodity": st.column_config.TextColumn("Commodity"),
                 "Prediction": st.column_config.TextColumn("Prediction"),
                 "Sentiment Score": st.column_config.ProgressColumn("Sentiment", format="%.2f", min_value=0, max_value=1),
                 "Allocation Weight": st.column_config.ProgressColumn("Weight", format="%.2f", min_value=0, max_value=1),
-                "Dollar Allocation": st.column_config.NumberColumn("Allocation ($)", format="$%.2f")
+                "Dollar Allocation": st.column_config.NumberColumn("Allocation ($)", format="$%.2f"),
+                "Current Price": st.column_config.NumberColumn("Current Price", format="$%.2f"),
+                "Future Price": st.column_config.NumberColumn("Future Price", format="$%.2f"),
+                "Gain (%)": st.column_config.NumberColumn("Gain (%)", format="%.2f"),
+                "Projected Return ($)": st.column_config.NumberColumn("Projected Return ($)", format="$%.2f"),
             },
             use_container_width=True,
             hide_index=True

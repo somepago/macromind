@@ -113,7 +113,7 @@ def project_gains(allocation_df: pd.DataFrame,
                   price_df: str,
                   startdate: str,
                   horizon_days: int = 1,
-                  mode: Literal["backtest", "forecast"] = "backtest") -> pd.DataFrame:
+                  mode: Literal["backtest", "forecast"] = "forecast") -> pd.DataFrame:
     """
     Project gains based on dollar allocation and either backtested or forecasted prices.
 
