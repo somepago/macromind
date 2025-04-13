@@ -40,6 +40,23 @@ st.markdown("""
         font-size: 1.2rem;
         color: #64748b;
     }
+    /* Animation for the magical spinning text */
+    .spinning-text {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #3b82f6;
+        animation: spin 1.5s infinite linear;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+    .loading-container {
+        text-align: center;
+        margin-top: 20px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -57,12 +74,46 @@ com_pred, commodities, available_dates = load_data()
 
 # ---------- HEADER ---------- #
 st.markdown("""
-    <div class="header">
-        <div class='title-text'>MacroMind</div>
-    </div>
-""", unsafe_allow_html=True)
+    <style>
+    .macro-header {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        padding: 10px 0;
+    }
 
-st.markdown("<div class='sub-text'>Market sentiment meets machine learning. Explore, predict, and explain with style.</div><br>", unsafe_allow_html=True)
+    .macro-title {
+        font-size: 3.5rem;
+        font-weight: 800;
+        background: linear-gradient(90deg, #4f46e5, #3b82f6, #06b6d4);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: glow 3s ease-in-out infinite;
+    }
+
+    .macro-icon {
+        font-size: 2.5rem;
+    }
+
+    @keyframes glow {
+        0% { text-shadow: 0 0 5px #3b82f6; }
+        50% { text-shadow: 0 0 15px #06b6d4; }
+        100% { text-shadow: 0 0 5px #3b82f6; }
+    }
+
+    .macro-sub {
+        font-size: 1.15rem;
+        color: #475569;
+        margin-top: -10px;
+    }
+    </style>
+
+    <div class="macro-header">
+        <div class="macro-icon">📈🌎</div>
+        <div class="macro-title">MacroMind</div>
+    </div>
+    <div class="macro-sub">Market sentiment meets ML. Explore, predict, and explain.</div>
+""", unsafe_allow_html=True)
 
 # ---------- SESSION STATE ---------- #
 if "initialized" not in st.session_state:
@@ -156,6 +207,7 @@ if st.button("🔮 Generate Predictions", use_container_width=True):
         st.warning("Please select at least one commodity before generating predictions.")
     else:
         with st.spinner("Crunching data and running models..."):
+            st.markdown('<div class="loading-container"><span class="spinning-text">✨🧙‍♀️ 🧙‍♂️✨</span></div>', unsafe_allow_html=True)
             preds, expls, sentiment_scores = com_pred.pred_all(st.session_state.selected_commodities, startdate)
             st.session_state.predictions = preds
             st.session_state.explanations = expls
@@ -227,34 +279,41 @@ if st.session_state.predictions:
             temp = st.slider("Temperature", min_value=0.1, max_value=2.0, value=0.5, step=0.1, 
                              help="Lower values create sharper differences between allocations. Higher values make allocations more even.")
         
-        if st.button("Generate Portfolio Allocation", use_container_width=True):
-            # Use the precomputed predictions and sentiments for selected commodities
-            allocation_df = commodity_allocator(
-                com_pred=com_pred,
-                commodities=st.session_state.selected_commodities,  # Use selected commodities instead of all
-                startdate=startdate,
-                budget=budget,
-                strategy=strategy,
-                temp=temp,
-                precomputed_predictions=st.session_state.predictions,
-                precomputed_sentiments=st.session_state.sentiment_scores
-            )
-            
-            # Display the allocation table
-            st.dataframe(
-                allocation_df,
-                column_config={
-                    "Commodity": st.column_config.TextColumn("Commodity"),
-                    "Prediction": st.column_config.TextColumn("Prediction"),
-                    "Sentiment Score": st.column_config.ProgressColumn("Sentiment", format="%.2f", min_value=0, max_value=1),
-                    "Allocation Weight": st.column_config.ProgressColumn("Weight", format="%.2f", min_value=0, max_value=1),
-                    "Dollar Allocation": st.column_config.NumberColumn("Allocation ($)", format="$%.2f")
-                },
-                use_container_width=True,
-                hide_index=True
-            )
-            
-            # Create a pie chart for the allocations
+        # Get indices of currently selected commodities
+        selected_indices = [st.session_state.selected_commodities.index(commodity) for commodity in st.session_state.selected_commodities]
+        
+        # Filter predictions and sentiment scores for selected commodities
+        filtered_predictions = [st.session_state.predictions[i] for i in selected_indices]
+        filtered_sentiments = [st.session_state.sentiment_scores[i] for i in selected_indices]
+        
+        # Generate portfolio allocation
+        allocation_df = commodity_allocator(
+            com_pred=com_pred,
+            commodities=st.session_state.selected_commodities,
+            startdate=startdate,
+            budget=budget,
+            strategy=strategy,
+            temp=temp,
+            precomputed_predictions=filtered_predictions,
+            precomputed_sentiments=filtered_sentiments
+        )
+        
+        # Display the allocation table
+        st.dataframe(
+            allocation_df,
+            column_config={
+                "Commodity": st.column_config.TextColumn("Commodity"),
+                "Prediction": st.column_config.TextColumn("Prediction"),
+                "Sentiment Score": st.column_config.ProgressColumn("Sentiment", format="%.2f", min_value=0, max_value=1),
+                "Allocation Weight": st.column_config.ProgressColumn("Weight", format="%.2f", min_value=0, max_value=1),
+                "Dollar Allocation": st.column_config.NumberColumn("Allocation ($)", format="$%.2f")
+            },
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Create a pie chart for the allocations
+        if len(allocation_df) > 0:  # Only create pie chart if there are allocations
             fig, ax = plt.subplots(figsize=(8, 8))
             ax.pie(
                 allocation_df["Dollar Allocation"], 
