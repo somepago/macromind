@@ -1,5 +1,5 @@
 from predictor import CommodityPricePredictor
-from typing import List, Callable
+from typing import List, Callable, Literal
 import pandas as pd
 import numpy as np
 from constants import current_news_data, current_stock_data
@@ -108,11 +108,88 @@ def commodity_allocator(com_pred: CommodityPricePredictor,
 
     return allocation_df
 
+
+def project_gains(allocation_df: pd.DataFrame,
+                  price_df: str,
+                  startdate: str,
+                  horizon_days: int = 1,
+                  mode: Literal["backtest", "forecast"] = "backtest") -> pd.DataFrame:
+    """
+    Project gains based on dollar allocation and either backtested or forecasted prices.
+
+    Parameters:
+    - allocation_df: Output DataFrame from commodity_allocator
+    - price_df: Historical price DataFrame (must include 'Date', 'Commodity', 'Average')
+    - startdate: Start date of the investment (string format: "YYYY-MM-DD")
+    - horizon_days: How far to look ahead for gain (1 = next day, 30 = a month)
+    - mode: "backtest" uses actual prices; "forecast" uses simple moving average
+
+    Returns a new DataFrame with projected gains.
+    """
+    price_df = pd.read_csv(price_df)
+    startdate = pd.to_datetime(startdate)
+    future_date = startdate + pd.Timedelta(days=horizon_days)
+
+    result = []
+
+    for _, row in allocation_df.iterrows():
+        commodity = row['Commodity']
+        allocation = row['Dollar Allocation']
+
+        df = price_df[price_df['Commodity'].str.lower() == commodity.lower()].copy()
+        df['Date'] = pd.to_datetime(df['Date'])
+        df = df.sort_values('Date')
+
+        # Get current price (price at or before startdate)
+        past_price_row = df[df['Date'] <= startdate].sort_values(by='Date', ascending=False).head(1)
+        if past_price_row.empty:
+            continue
+        current_price = past_price_row['Average'].values[0]
+
+        if mode == "backtest":
+            # Use actual future price
+            future_price_row = df[df['Date'] >= future_date].sort_values(by='Date').head(1)
+            if future_price_row.empty:
+                continue
+            future_price = future_price_row['Average'].values[0]
+        elif mode == "forecast":
+            # Forecast using simple moving average of previous 10 days
+            window = df[df['Date'] < startdate].tail(10)['Average']
+            future_price = window.mean()
+        else:
+            raise ValueError("mode must be 'backtest' or 'forecast'")
+
+        pct_gain = (future_price - current_price) / current_price
+        projected_return = allocation * pct_gain
+
+        result.append({
+            "Commodity": commodity,
+            "Current Price": round(current_price, 2),
+            "Future Price": round(future_price, 2),
+            "Dollar Allocation": allocation,
+            "Gain (%)": round(pct_gain * 100, 2),
+            "Projected Return ($)": round(projected_return, 2),
+            "Mode": mode,
+            "Horizon (days)": horizon_days
+        })
+
+    return pd.DataFrame(result)
+
+
 if __name__ == "__main__":
     com_pred = CommodityPricePredictor(news_df=current_news_data, price_df=current_stock_data)
     commodities = ["coffee", "gold", "oil"]
     startdate = "2025-04-06"
     budget = 100.0
-    strategy = "aggressive"  # Try "conservative", "linear", etc.
-    allocation = commodity_allocator(com_pred, commodities, startdate, budget, strategy=strategy)
-    print(allocation)
+
+    allocation = commodity_allocator(com_pred, commodities, startdate, budget)
+
+    # Backtest gain (e.g., 5 days later)
+    gains_bt = project_gains(allocation, current_stock_data, startdate, horizon_days=5, mode="backtest")
+    print("\n--- Backtest Gains ---")
+    print(gains_bt)
+
+    # Forecast gain
+    gains_forecast = project_gains(allocation, current_stock_data, startdate, horizon_days=5, mode="forecast")
+    print("\n--- Forecast Gains ---")
+    print(gains_forecast)
