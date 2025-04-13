@@ -135,31 +135,49 @@ def allocate_funds(forecast_df: pd.DataFrame, total_funds: float = 100) -> pd.Da
     # Step 1: Calculate the gain percentage (if not already present)
     forecast_df['gain_percent'] = ((forecast_df['predicted_price'] - forecast_df['current_price']) / forecast_df['current_price']) * 100
 
-    # Step 2: Filter out commodities with negative gain_percent
-    # forecast_df = forecast_df[forecast_df['gain_percent'] > 0]
+    # Create a working copy that includes all commodities for display
+    all_commodities_df = forecast_df.copy()
+    
+    # Step 2: Filter out commodities with negative gain_percent for allocation purposes
+    positive_returns_df = forecast_df[forecast_df['gain_percent'] > 0].copy()
 
-    # If there are no positive gain commodities, return a dataframe with zero allocation
-    if forecast_df.empty:
-        forecast_df['allocation'] = 0
-        forecast_df['predicted_gain_dollars'] = 0
-        return forecast_df[['Commodity', 'gain_percent', 'allocation', 'predicted_gain_dollars']]
-
-    # Step 3: Normalize the gain percentage to sum to 100% (only for positive gain commodities)
-    total_gain = forecast_df['gain_percent'].sum()
-    forecast_df['normalized_gain'] = forecast_df['gain_percent'] / total_gain
-
-    # Step 4: Allocate funds based on normalized gain
-    forecast_df['allocation'] = forecast_df['normalized_gain'] * total_funds
+    # If there are no positive gain commodities, allocate based on least negative
+    if positive_returns_df.empty:
+        # For negative returns, find the least negative ones
+        forecast_df['allocation'] = 0  # Default to zero allocation
+        
+        # Only if we must allocate, choose least negative options
+        if len(forecast_df) > 0:
+            # Shift values to make them positive for allocation
+            min_gain = forecast_df['gain_percent'].min()
+            if min_gain < 0:
+                adjusted_gain = forecast_df['gain_percent'] - min_gain + 0.1  # Small positive offset
+                total_adj_gain = adjusted_gain.sum()
+                forecast_df['allocation'] = (adjusted_gain / total_adj_gain) * total_funds
+            else:
+                # Equal allocation if all are zero
+                forecast_df['allocation'] = total_funds / len(forecast_df)
+    else:
+        # Step 3: Normalize positive gain percentages to sum to 100%
+        total_gain = positive_returns_df['gain_percent'].sum()
+        positive_returns_df['allocation'] = (positive_returns_df['gain_percent'] / total_gain) * total_funds
+        
+        # Merge allocations back to original dataframe
+        forecast_df = forecast_df.copy()
+        forecast_df['allocation'] = 0  # Default all to zero
+        for idx, row in positive_returns_df.iterrows():
+            forecast_df.loc[forecast_df['Commodity'] == row['Commodity'], 'allocation'] = row['allocation']
 
     # Step 5: Calculate the potential dollar gain for each commodity
     forecast_df['predicted_gain_dollars'] = (
         (forecast_df['predicted_price'] - forecast_df['current_price']) *
         (forecast_df['allocation'] / forecast_df['current_price'])
     )
+    
     forecast_df['MacroEconIndicator'] = forecast_df['trend_macro']
     forecast_df['Sentiment Score'] = forecast_df['sentiment']
-    forecast_df.rename(columns={'gain_percent': 'Predicted Gain (%)', 'allocation': 'Allocation (%)', 'predicted_gain_dollars':'Predicted Gain ($)'}, inplace=True)
-    forecast_df = forecast_df[['Commodity', 'MacroEconIndicator', 'Sentiment Score', 'Predicted Gain (%)', 'Allocation (%)', 'Predicted Gain ($)']]
+    forecast_df.rename(columns={'gain_percent': 'Predicted Gain (%)', 'allocation': 'Allocation (%)', 'predicted_gain_dollars':'Projected Return ($)'}, inplace=True)
+    forecast_df = forecast_df[['Commodity', 'MacroEconIndicator', 'Sentiment Score', 'Predicted Gain (%)', 'Allocation (%)', 'Projected Return ($)']]
     return forecast_df
 
 
@@ -182,4 +200,3 @@ if __name__ == "__main__":
 
     allocations = allocate_funds(forecast_df,100)
     print(allocations)
-    

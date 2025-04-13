@@ -3,6 +3,7 @@ from predictor import CommodityPricePredictor
 import pandas as pd
 from constants import current_news_data, current_stock_data
 from allocator import commodity_allocator, project_gains
+from allocator_prophet import price_forecast, allocate_funds
 import matplotlib.pyplot as plt
 
 # ---------- CONFIG ---------- #
@@ -289,54 +290,56 @@ if st.session_state.predictions:
         filtered_sentiments = [st.session_state.sentiment_scores[i] for i in selected_indices]
         
         # Generate portfolio allocation
-        allocation_df = commodity_allocator(
+        forecast_df = price_forecast(
             com_pred=com_pred,
+            price_df=current_stock_data,
             commodities=st.session_state.selected_commodities,
             startdate=startdate,
-            budget=budget,
-            strategy=strategy,
-            temp=temp,
+            forecast_days=horizon_day,
             precomputed_predictions=filtered_predictions,
             precomputed_sentiments=filtered_sentiments
         )
         
         # Project gains
-        gains_df = project_gains(
-            allocation_df,
-            current_stock_data,
-            startdate,
-            horizon_days=horizon_day
-        )
-        gains_df.drop(columns=["Mode", "Horizon (days)"])
+        gains_df = allocate_funds(forecast_df, budget)
         
         # Display the allocation table
         st.dataframe(
             gains_df,
             column_config={
                 "Commodity": st.column_config.TextColumn("Commodity"),
-                "Prediction": st.column_config.TextColumn("Prediction"),
+                "MacroEconIndicator": st.column_config.TextColumn("MacroEconIndicator"),
                 "Sentiment Score": st.column_config.ProgressColumn("Sentiment", format="%.2f", min_value=0, max_value=1),
-                "Allocation Weight": st.column_config.ProgressColumn("Weight", format="%.2f", min_value=0, max_value=1),
-                "Dollar Allocation": st.column_config.NumberColumn("Allocation ($)", format="$%.2f"),
-                "Current Price": st.column_config.NumberColumn("Current Price", format="$%.2f"),
-                "Future Price": st.column_config.NumberColumn("Future Price", format="$%.2f"),
-                "Gain (%)": st.column_config.NumberColumn("Gain (%)", format="%.2f"),
+                "Predicted Gain (%)": st.column_config.NumberColumn("Predicted Gain (%)", format="%.2f"),
+                "Allocation ($)": st.column_config.NumberColumn("Allocation (%)", format="%.2f"),
                 "Projected Return ($)": st.column_config.NumberColumn("Projected Return ($)", format="$%.2f"),
             },
             use_container_width=True,
             hide_index=True
         )
+
+        # Calculate total projected return
+        total_projected_return = gains_df["Projected Return ($)"].sum()
+        total_return_percentage = (total_projected_return / budget) * 100
         
-        # Create a pie chart for the allocations
-        if len(allocation_df) > 0:  # Only create pie chart if there are allocations
-            fig, ax = plt.subplots(figsize=(8, 8))
-            ax.pie(
-                allocation_df["Dollar Allocation"], 
-                labels=[f"{row['Commodity']} (${row['Dollar Allocation']:.2f})" for _, row in allocation_df.iterrows()],
-                autopct='%1.1f%%',
-                startangle=90,
-                shadow=False,
-                explode=[0.05] * len(allocation_df)
-            )
-            ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle
-            st.pyplot(fig)
+        # Display the total projected return in a metric
+        st.metric(
+            "Total Projected Return",
+            f"${total_projected_return:.2f}",
+            f"{total_return_percentage:.2f}%",
+            delta_color="normal" if total_projected_return >= 0 else "inverse"
+        )
+        
+        # # Create a pie chart for the allocations
+        # if len(gains_df) > 0:  # Only create pie chart if there are allocations
+        #     fig, ax = plt.subplots(figsize=(8, 8))
+        #     ax.pie(
+        #         gains_df["Allocation (%)"], 
+        #         labels=[f"{row['Commodity']} (${row['Allocation (%)']:.2f})" for _, row in gains_df.iterrows()],
+        #         autopct='%1.1f%%',
+        #         startangle=90,
+        #         shadow=False,
+        #         explode=[0.05] * len(gains_df)
+        #     )
+        #     ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle
+        #     st.pyplot(fig)
