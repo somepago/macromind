@@ -135,6 +135,9 @@ def project_gains(allocation_df: pd.DataFrame,
     for _, row in allocation_df.iterrows():
         commodity = row['Commodity']
         allocation = row['Dollar Allocation']
+        sentiment = row['Sentiment Score']
+        prediction = row['Prediction']
+        weight = row['Allocation Weight']
 
         df = price_df[price_df['Commodity'].str.lower() == commodity.lower()].copy()
         df['Date'] = pd.to_datetime(df['Date'])
@@ -164,6 +167,9 @@ def project_gains(allocation_df: pd.DataFrame,
 
         result.append({
             "Commodity": commodity,
+            "Prediction": prediction,
+            "Sentiment Score": sentiment,
+            "Allocation Weight": weight,
             "Current Price": round(current_price, 2),
             "Future Price": round(future_price, 2),
             "Dollar Allocation": allocation,
@@ -183,11 +189,12 @@ if __name__ == "__main__":
     budget = 100.0
 
     allocation = commodity_allocator(com_pred, commodities, startdate, budget)
+    print(allocation.head(3))
 
-    # Backtest gain (e.g., 5 days later)
-    gains_bt = project_gains(allocation, current_stock_data, startdate, horizon_days=5, mode="backtest")
-    print("\n--- Backtest Gains ---")
-    print(gains_bt)
+    # # Backtest gain (e.g., 5 days later)
+    # gains_bt = project_gains(allocation, current_stock_data, startdate, horizon_days=5, mode="backtest")
+    # print("\n--- Backtest Gains ---")
+    # print(gains_bt)
 
     # Forecast gain
     gains_forecast = project_gains(allocation, current_stock_data, startdate, horizon_days=5, mode="forecast")
