@@ -1,3 +1,5 @@
+import sys
+import os
 from constants import commodity_to_etfs_stocks,etfs_stocks_to_commodity
 import yfinance as yf
 import pandas as pd
@@ -30,16 +32,17 @@ def commodity_to_tickers(commodity, ticker_type="stock"):
 # Function to fetch historical prices for the last 'num_days' days and calculate daily average
 def fetch_daily_average_price(tickers, num_days=5):
     data = yf.download(tickers, period=f"{num_days}d", interval="1d", group_by='ticker', auto_adjust=True)
-
     # Compute average daily price = (Open + Close) / 2
     avg_price_df = pd.DataFrame()
     for ticker in tickers:
         if ticker in data.columns.levels[0]:
-            ticker_data = data[ticker]
+            ticker_data = data[ticker].copy()  # Create a copy to avoid SettingWithCopyWarning
             ticker_data['Average'] = (ticker_data['Open'] + ticker_data['Close']) / 2
             ticker_data['Ticker'] = ticker
             ticker_data["Commodity"] = etfs_stocks_to_commodity[ticker]
-            avg_price_df = pd.concat([avg_price_df, ticker_data[['Average', 'Ticker','Commodity']].copy()])
+            # Select all needed columns including Open and Close
+            columns_to_keep = ['Open', 'Close', 'Average', 'Ticker', 'Commodity']
+            avg_price_df = pd.concat([avg_price_df, ticker_data[columns_to_keep]])
 
     avg_price_df.reset_index(inplace=True)
     avg_price_df = avg_price_df[avg_price_df['Average'].notna()]
@@ -51,6 +54,9 @@ def fetch_daily_average_price(tickers, num_days=5):
 # Example usage: Fetch the last 5 days of average stock prices
 stock_tickers = get_all_tickers(commodity_to_etfs_stocks)
 df_stock_prices_avg = fetch_daily_average_price(stock_tickers, num_days=60)
-df_stock_prices_avg.to_csv("data_prep/commodity_data_60days.csv")
+# Save to data_prep directory
+df_stock_prices_avg.to_csv("data_prep/commodity_data_60days.csv", index=False)
+# Also save to root for backward compatibility
+df_stock_prices_avg.to_csv("./commodity_data_60days.csv", index=False)
 # Display the fetched data
 print(df_stock_prices_avg)

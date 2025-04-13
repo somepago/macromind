@@ -2,7 +2,7 @@ import pandas as pd
 
 HISTORY_IN_DAYS = 60
 
-current_news_data = "data_prep/scraped_news_finhub/commodity_news_20250412_133520.csv"
+current_news_data = "data_prep/scraped_news_finhub/commodity_news.csv"
 current_stock_data = "data_prep/commodity_data_60days.csv"
 
 # Commodity to ETF/Stock mapping
